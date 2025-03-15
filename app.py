@@ -5,21 +5,28 @@ from langchain_community.utilities import ArxivAPIWrapper, WikipediaAPIWrapper  
 from langchain_community.tools import ArxivQueryRun, WikipediaQueryRun, DuckDuckGoSearchRun  # Search tools
 from langchain.agents import initialize_agent, AgentType  # LangChain agent setup
 from langchain.callbacks import StreamlitCallbackHandler  # Handles AI thoughts in Streamlit UI
-import os  # For environment variable handling
-from dotenv import load_dotenv  # Load environment variables from .env file
 
-# Load environment variables from .env file
-load_dotenv()
+# 🔹 Step 1: Streamlit UI Setup
 
-# Get Groq API Key from environment variables
-API_KEY = os.getenv("GROQ_API_KEY")
+# Set the page title in Streamlit
+st.title("🔎 LangChain - Chat with Search")
+st.write("An AI chatbot that searches the web using LangChain & Groq. Try it out!")
 
-# If API key is missing, display an error and stop execution
-if not API_KEY:
-    st.error("❌ Error: GROQ API Key not found! Make sure it's set in your .env file as 'GROQ_API_KEY'.")
+# 🔹 Step 2: API Key Input
+if "groq_api_key" not in st.session_state:
+    st.session_state["groq_api_key"] = ""
+
+st.session_state["groq_api_key"] = st.text_input(
+    "Enter your Groq API Key:", 
+    value=st.session_state["groq_api_key"], 
+    type="password"
+)
+
+if not st.session_state["groq_api_key"]:
+    st.warning("⚠️ Please enter your Groq API key to continue.")
     st.stop()
 
-# 🔹 Step 1: Initialize External Search & Research Tools
+# 🔹 Step 3: Initialize External Search & Research Tools
 
 # ArXiv API Wrapper (Fetches academic papers, limits to 1 result & max 200 characters)
 arxiv_wrapper = ArxivAPIWrapper(top_k_results=1, doc_content_chars_max=200)
@@ -32,15 +39,8 @@ wiki = WikipediaQueryRun(api_wrapper=wiki_wrapper)  # Tool to query Wikipedia
 # DuckDuckGo Search (General web search)
 search = DuckDuckGoSearchRun(name="Search")
 
-# 🔹 Step 2: Streamlit UI Setup
+# 🔹 Step 4: Initialize Session State for Storing Chat History
 
-# Set the page title in Streamlit
-st.title("🔎 LangChain - Chat with Search")
-st.write("An AI chatbot that searches the web using LangChain & Groq. Try it out!")
-
-# 🔹 Step 3: Initialize Session State for Storing Chat History
-
-# If "messages" does not exist in session state, initialize it with a welcome message
 if "messages" not in st.session_state:
     st.session_state["messages"] = [
         {"role": "assistant", "content": "Hi, I'm a chatbot who can search the web. How can I help you?"}
@@ -50,52 +50,49 @@ if "messages" not in st.session_state:
 for msg in st.session_state.messages:
     st.chat_message(msg["role"]).write(msg["content"])
 
-# 🔹 Step 4: Process User Input
+# 🔹 Step 5: Process User Input
 
-# Capture user input from the chat box
 if prompt := st.chat_input(placeholder="Ask me anything..."):
-    # Append user message to session state
     st.session_state.messages.append({"role": "user", "content": prompt})
-    st.chat_message("user").write(prompt)  # Display user message in chat
+    st.chat_message("user").write(prompt)
 
-    # 🔹 Step 5: Define the Language Model (LLM) - Groq API
+    # 🔹 Step 6: Define the Language Model (LLM) - Groq API
     llm = ChatGroq(
-        groq_api_key=API_KEY,  # Automatically load API key from .env
-        model_name="Llama3-8b-8192",  # LLM model from Groq
-        streaming=True  # Enable streaming response
+        groq_api_key=st.session_state["groq_api_key"],  # Use the entered API key
+        model_name="Llama3-8b-8192",
+        streaming=True
     )
 
-    # Define tools available to the chatbot (Search, Wikipedia, ArXiv)
+    # Define tools available to the chatbot
     tools = [search, arxiv, wiki]
 
-    # Manually define a system message to guide the AI's response behavior
+    # System message for structured responses
     system_message = (
         "You are an AI assistant that follows the Thought → Action → Observation pattern. "
         "Always output a well-structured response."
     )
-    
-    # Combine system message with user input
+
     formatted_prompt = f"{system_message}\n\nUser: {prompt}"
 
-    # 🔹 Step 6: Initialize the LangChain Agent
+    # 🔹 Step 7: Initialize the LangChain Agent
 
     search_agent = initialize_agent(
-        tools=tools,  # Provide search and research tools
-        llm=llm,  # Use the defined Groq Chat model
-        agent=AgentType.STRUCTURED_CHAT_ZERO_SHOT_REACT_DESCRIPTION,  # Ensures structured responses
-        handle_parsing_errors="retry"  # If parsing fails, retry execution
+        tools=tools,
+        llm=llm,
+        agent=AgentType.STRUCTURED_CHAT_ZERO_SHOT_REACT_DESCRIPTION,
+        handle_parsing_errors="retry"
     )
 
-    # 🔹 Step 7: Generate & Display AI Response
+    # 🔹 Step 8: Generate & Display AI Response
 
-    raw_response = None  # Variable to store AI output for debugging
+    raw_response = None
     try:
-        with st.chat_message("assistant"):  # Display assistant's response in chat
-            st_cb = StreamlitCallbackHandler(st.container(), expand_new_thoughts=False)  # Callback handler for live updates
-            raw_response = search_agent.run(formatted_prompt, callbacks=[st_cb])  # Run agent with formatted prompt
-            st.session_state.messages.append({"role": "assistant", "content": raw_response})  # Save response
-            st.write(raw_response)  # Display response
+        with st.chat_message("assistant"):
+            st_cb = StreamlitCallbackHandler(st.container(), expand_new_thoughts=False)
+            raw_response = search_agent.run(formatted_prompt, callbacks=[st_cb])
+            st.session_state.messages.append({"role": "assistant", "content": raw_response})
+            st.write(raw_response)
     except Exception as e:
-        st.error(f"❌ An error occurred: {e}")  # Show error message if something goes wrong
+        st.error(f"❌ An error occurred: {e}")
         if raw_response:
-            st.write("🛠️ Raw LLM Response:", raw_response)  # Debugging output if available
+            st.write("🛠️ Raw LLM Response:", raw_response)
